@@ -9,7 +9,13 @@ Every number comes from GoHighLevel except spend:
   attended     tag  webinar-<mon-d-yyyy>-attended
   booked call  tag  webinar-<mon-d-yyyy>-booked-call | -webinar-booked-call | -webinar-ppa-booked
                (GHL renamed the booked tag after the Oct 12 webinar; all three are read)
-  purchase     tag  "bb purchased", dated by the close-date field, amount from the amount field
+  booked call  also: a "Webinar PPA Calendar" opportunity in the Closer Pipeline created in the
+               week after the webinar (catches the few bookings that never got a tag)
+  call held    the booker's Closer Pipeline stage is past the call (anything but no show/cancel,
+               needs reschedule, scheduled-call)
+  purchase     a "closed won" stage in the Closer Pipeline, dated by its last stage change, valued
+               at the opportunity's contract value; plus any "bb purchased" contact the pipeline
+               does not show as won (close-date and amount fields)
   the ad       the contact's own form submission in that cycle:
                  website opt-in  -> url_params.h_ad_id on the Weekly Webinar [Facebook] funnel
                  Meta lead form  -> GHL's synced fb-<location> submission, which carries ad_id
@@ -55,6 +61,9 @@ F_CLOSE = "M3nXNgDc6mkCuPUwV1HR"
 F_PLAN = "uLotw7jRnZDVYdp3oz91"
 BOOKED_SUFFIXES = ("booked-call", "webinar-booked-call", "webinar-ppa-booked")
 PURCHASE_TAG = "bb purchased"
+CLOSER_PIPELINE = "thjmVh2DeUQlBhNUOCp0"   # "02: Closer Pipeline"
+PPA_SOURCE = "Webinar PPA Calendar"
+NOT_HELD = {"no show/cancel", "needs reschedule", "scheduled-call"}
 # PBI/CLAUDE.md: retired creatives, never rank them as winners (matched on image hash)
 RETIRED_HASHES = {"5aa5b3c86b8de4813d14c4cf7ef428c1": "Image 06",
                   "d8214f6e4cbe8373bb0f3b9f3ed79610": "Image ad 14"}
@@ -150,6 +159,27 @@ def all_submissions():
         rows.append(submission_row(s))
     print(f"  ghl: {len(rows)} submissions since {SUBS_SINCE} (meta total {total})")
     return rows
+
+
+def closer_opps():
+    """Every Closer Pipeline opportunity as {contact, stage, value, created, changed, source}."""
+    pipes = ghl("GET", f"/opportunities/pipelines?locationId={LOC}")["pipelines"]
+    stage = {st["id"]: st["name"] for p in pipes if p["id"] == CLOSER_PIPELINE for st in p["stages"]}
+    out, page = [], 1
+    while True:
+        d = ghl("GET", "/opportunities/search?" + urllib.parse.urlencode({
+            "location_id": LOC, "pipeline_id": CLOSER_PIPELINE, "limit": 100, "page": page}))
+        rows = d.get("opportunities", [])
+        for o in rows:
+            out.append({"c": o.get("contactId"), "stage": stage.get(o.get("pipelineStageId"), ""),
+                        "value": float(o.get("monetaryValue") or 0), "created": o.get("createdAt") or "",
+                        "changed": o.get("lastStageChangeAt") or o.get("lastStatusChangeAt")
+                        or o.get("updatedAt") or "", "source": o.get("source") or ""})
+        if len(rows) < 100:
+            break
+        page += 1
+    print(f"  ghl: {len(out)} Closer Pipeline opportunities")
+    return out
 
 
 # ---------------------------------------------------------------- cycles
@@ -259,6 +289,15 @@ def build():
     for v in by_contact.values():
         v.sort(key=lambda s: s["t"])
 
+    opps = closer_opps()
+    opp_by_c = defaultdict(list)
+    for o in opps:
+        opp_by_c[o["c"]].append(o)
+
+    def held(cid):
+        st = [o["stage"] for o in opp_by_c.get(cid, [])]
+        return bool(st) and any(x not in NOT_HELD for x in st)
+
     regs = []      # one row per (contact, webinar)
     weeks = []
     for d in cycles():
@@ -269,6 +308,8 @@ def build():
         booked = set()
         for suf in BOOKED_SUFFIXES:
             booked |= {c["id"] for c in tagged(f"{slug(d)}-{suf}")}
+        wk_lo, wk_hi = d.isoformat(), (d + timedelta(days=7)).isoformat()
+        booked |= {o["c"] for o in opps if o["source"] == PPA_SOURCE and wk_lo <= o["created"][:10] < wk_hi}
         opened, closed = cycle_window(d)
         lo, hi = opened - timedelta(days=1), closed + timedelta(hours=2)
         reg_ids = {c["id"] for c in reg}
@@ -288,7 +329,8 @@ def build():
             else:
                 src, ad, path = "No opt-in on record", None, "Unknown"
             regs.append({"c": c["id"], "webinar": d.isoformat(), "src": src, "ad": ad,
-                         "path": path, "attended": c["id"] in att, "booked": c["id"] in booked})
+                         "path": path, "attended": c["id"] in att, "booked": c["id"] in booked,
+                         "held": c["id"] in booked and held(c["id"])})
         spend = spend_by_ad(opened, closed, now)
         weeks.append({"webinar": d.isoformat(), "opened": opened.isoformat(),
                       "closed": closed.isoformat(), "open": closed > now,
@@ -300,8 +342,24 @@ def build():
               f"{len(booked)} booked ({len(booked - reg_ids)} not on the registrant list), "
               f"${sum(spend.values()):,.0f} spend")
 
-    # purchases
-    buyers = tagged(PURCHASE_TAG)
+    # purchases: pipeline wins first (contract value, stage-change date), then tag-only buyers
+    buyers = []
+    won_c = set()
+    for o in opps:
+        if o["stage"].startswith("closed won") and o["c"] not in won_c:
+            won_c.add(o["c"])
+            plan = {"closed won - PIF": "PIF", "closed won - payment plan": "Payment plan",
+                    "closed won - bb retake": "BB retake"}.get(o["stage"], o["stage"])
+            buyers.append({"id": o["c"], "close": o["changed"][:10], "amount": o["value"],
+                           "plan": plan, "tags": None, "via": "Closer Pipeline"})
+    tag_buyers = tagged(PURCHASE_TAG)
+    tag_by_c = {b["id"]: b for b in tag_buyers}
+    for b in tag_buyers:
+        if b["id"] not in won_c:
+            buyers.append(dict(b, via="bb purchased tag"))
+    for b in buyers:
+        if b["tags"] is None:
+            b["tags"] = (tag_by_c.get(b["id"]) or {}).get("tags") or []
     reg_by_c = defaultdict(list)
     for r in regs:
         reg_by_c[r["c"]].append(r)
@@ -324,7 +382,7 @@ def build():
         if prior:
             r = max(prior, key=lambda r: r["webinar"])
             sale = {"route": "Webinar", "webinar": r["webinar"], "ad": r["ad"], "src": r["src"],
-                    "path": r["path"], "attended": r["attended"], "booked": r["booked"]}
+                    "path": r["path"], "attended": r["attended"], "booked": r["booked"] or b["id"] in opp_by_c}
         else:
             paid = [s for s in by_contact.get(b["id"], [])
                     if s["ad"] and parse_t(s["t"]).date() <= cd]
@@ -338,7 +396,8 @@ def build():
             sale = {"route": route, "webinar": None, "ad": s["ad"] if s else None,
                     "src": "ad" if s else route, "path": s["path"] if s else "Unknown",
                     "campaign": s["campaign"] if s else "", "attended": None, "booked": None}
-        sale.update({"close": cd.isoformat(), "amount": amount, "plan": b.get("plan")})
+        sale.update({"close": cd.isoformat(), "amount": amount, "plan": b.get("plan"), "via": b["via"],
+                     "held": held(b["id"])})
         sales.append(sale)
 
     ads = sorted({r["ad"] for r in regs if r["ad"]} | {s["ad"] for s in sales if s["ad"]}

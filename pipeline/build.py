@@ -315,6 +315,8 @@ footer { border-top: 1px solid var(--line); padding-block: 22px 40px; font-size:
             <th><button data-k="show_up">Show-up</button></th>
             <th aria-sort="descending"><button data-k="booked">Booked calls</button></th>
             <th><button data-k="book_rate">Booked per registrant</button></th>
+            <th><button data-k="held">Calls held</button></th>
+            <th><button data-k="cost_per_held">Cost per call held</button></th>
             <th><button data-k="cost_per_booked">Cost per booked call</button></th>
             <th><button data-k="purchases">Purchases</button></th>
             <th><button data-k="cost_per_purchase">Cost per purchase</button></th>
@@ -334,7 +336,7 @@ footer { border-top: 1px solid var(--line); padding-block: 22px 40px; font-size:
         <table id="wtbl">
           <thead><tr>
             <th class="l">Webinar</th><th class="l">Status</th><th>Spend</th><th>Registrants</th><th>Lead form</th><th>Website</th>
-            <th>Show-up</th><th>Booked calls</th><th>Cost per booked call</th><th>Purchases</th><th>Cost per purchase</th>
+            <th>Show-up</th><th>Booked calls</th><th>Calls held</th><th>Cost per booked call</th><th>Purchases</th><th>Cost per purchase</th><th>Contract value</th>
           </tr></thead>
           <tbody></tbody>
         </table>
@@ -345,7 +347,7 @@ footer { border-top: 1px solid var(--line); padding-block: 22px 40px; font-size:
       <div class="tbl">
         <table id="ctbl">
           <thead><tr>
-            <th class="l">Creative</th><th class="l">Path</th><th>Spend</th><th>Registrants</th><th>Showed up</th><th>Show-up</th><th>Booked calls</th><th>Purchases</th><th>Cost per purchase</th>
+            <th class="l">Creative</th><th class="l">Path</th><th>Spend</th><th>Registrants</th><th>Showed up</th><th>Show-up</th><th>Booked calls</th><th>Calls held</th><th>Purchases</th><th>Cost per purchase</th>
           </tr></thead>
           <tbody></tbody>
         </table>
@@ -355,12 +357,12 @@ footer { border-top: 1px solid var(--line); padding-block: 22px 40px; font-size:
 
   <section id="sales">
     <h2>Purchases from webinar-ad registrants</h2>
-    <p class="sub">Each sale is credited to the ad on the buyer's most recent webinar registration on or before the day it closed. Amount is the figure recorded in GoHighLevel: paid in full shows the full price, a payment plan shows the plan amount.</p>
+    <p class="sub">Each sale is credited to the ad on the buyer's most recent webinar registration on or before the day it closed. Contract value is the deal's value in the GoHighLevel Closer Pipeline (a payment plan shows its full contract, not one installment).</p>
     <div class="card">
       <div class="tbl short">
         <table id="stbl">
           <thead><tr>
-            <th class="l">Closed</th><th>Amount</th><th class="l">Plan</th><th class="l">Creative</th><th class="l">Path</th><th class="l">Webinar</th><th class="l">Showed up</th><th class="l">Booked a call</th>
+            <th class="l">Closed</th><th>Contract value</th><th class="l">Plan</th><th class="l">Creative</th><th class="l">Path</th><th class="l">Webinar</th><th class="l">Showed up</th><th class="l">Booked a call</th><th class="l">Held the call</th>
           </tr></thead>
           <tbody></tbody>
         </table>
@@ -373,7 +375,8 @@ footer { border-top: 1px solid var(--line); padding-block: 22px 40px; font-size:
     <div class="method">
       <p><b>Webinar ads only.</b> Every count is a person who registered for the weekly webinar through a Meta webinar ad. People who came from organic posts, the past-cohort list or another funnel are left out.</p>
       <p><b>The ad.</b> Website registrations carry the ad in the page link. Meta lead-form registrations carry it in GoHighLevel's copy of the lead form. Each person is credited to the ad on their own registration that week.</p>
-      <p><b>Show-up, booked call, purchase.</b> GoHighLevel's tags for that webinar: attended, booked call (both tag names used since October), and the Boutique Breakthrough purchase tag with its close date.</p>
+      <p><b>Show-up and booked call.</b> GoHighLevel's tags for that webinar (attended; booked call under both tag names used since October), plus any Profit Path booking from the webinar calendar that week that never got a tag.</p>
+      <p><b>Call held and purchase.</b> From the GoHighLevel Closer Pipeline. A call counts as held once the booker's deal has moved past scheduled, no-show or reschedule. A purchase is a closed-won deal, dated when it was won and valued at its contract value; a buyer tagged as a Boutique Breakthrough purchase but missing from the pipeline is still counted.</p>
       <p><b>Spend.</b> Meta's spend per ad, hour by hour, from noon Central on the Monday before each webinar to noon Central on webinar day. Lead-form spend is spend in the lead-ad campaigns.</p>
       <p><b>What it cannot see.</b> A booking or purchase made under a different email than the registration cannot be tied to an ad, so these counts are a floor. The newest finished webinar keeps collecting bookings for about a week.</p>
       <p><b>Retired creatives</b> stay in the table for the record with a Retired label. They are switched off on purpose and are never ranked as winners.</p>
@@ -412,8 +415,9 @@ footer { border-top: 1px solid var(--line); padding-block: 22px 40px; font-size:
   const weeks = D.weeks.slice().sort((a, b) => a.webinar.localeCompare(b.webinar));
   const sumOf = (rows) => {
     const s = (f) => rows.reduce((t, r) => t + (r[f] || 0), 0);
-    const reg = s('registrants'), att = s('attended'), bk = s('booked'), sp = s('spend'), pu = s('purchases');
-    return {spend: sp, registrants: reg, attended: att, show_up: reg ? att / reg : null, booked: bk,
+    const reg = s('registrants'), att = s('attended'), bk = s('booked'), sp = s('spend'), pu = s('purchases'), hd = s('held');
+    return {spend: sp, registrants: reg, attended: att, show_up: reg ? att / reg : null, booked: bk, held: hd,
+            held_rate: bk ? hd / bk : null, cost_per_held: hd ? sp / hd : null, revenue: s('revenue'),
             cost_per_booked: bk ? sp / bk : null, purchases: pu, cost_per_purchase: pu ? sp / pu : null,
             cost_per_reg: reg ? sp / reg : null};
   };
@@ -427,8 +431,8 @@ footer { border-top: 1px solid var(--line); padding-block: 22px 40px; font-size:
     ['Show-up rate', 'show_up', pct, false],
     ['Purchases', 'purchases', n, false],
     ['Cost per purchase', 'cost_per_purchase', money, true],
-    ['Registrants from ads', 'registrants', n, null],
-    ['Cost per registrant', 'cost_per_reg', money, null],
+    ['Calls held', 'held', n, false],
+    ['Cost per call held', 'cost_per_held', money, true],
     ['Ad spend', 'spend', money, null],
   ];
   $('#kpis').innerHTML = kpis.map(([lab, f, fmt, lowerBetter, hero]) => {
@@ -444,7 +448,7 @@ footer { border-top: 1px solid var(--line); padding-block: 22px 40px; font-size:
   }).join('');
 
   // Funnel, last 4 webinars
-  const steps = [['Registered', L.registrants], ['Showed up live', L.attended], ['Booked a call', L.booked], ['Purchased', L.purchases]];
+  const steps = [['Registered', L.registrants], ['Showed up live', L.attended], ['Booked a call', L.booked], ['Held the call', L.held], ['Purchased', L.purchases]];
   $('#funnel-note').textContent = 'Last 4 finished webinars, webinar-ad registrants only. ' + pct(L.registrants ? L.booked / L.registrants : null) + ' of registrants booked a call.';
   $('#funnel').innerHTML = steps.map(([lab, v], i) => {
     const w = L.registrants ? Math.max(1.5, v / L.registrants * 100) : 0;
@@ -485,7 +489,7 @@ footer { border-top: 1px solid var(--line); padding-block: 22px 40px; font-size:
     trend.querySelectorAll('rect.hit').forEach((el) => {
       el.addEventListener('pointermove', (ev) => {
         const r = rows[+el.dataset.i];
-        tip.innerHTML = `<b>Webinar ${day(r.webinar)}${r.status === 'Complete' ? '' : ' (still booking)'}</b>${n(r.booked)} booked calls<br>${pct(r.show_up)} showed up (${n(r.attended)} of ${n(r.registrants)})<br>${money(r.cost_per_booked)} per booked call<br>${n(r.purchases)} purchases`;
+        tip.innerHTML = `<b>Webinar ${day(r.webinar)}${r.status === 'Complete' ? '' : ' (still booking)'}</b>${n(r.booked)} booked calls, ${n(r.held)} held<br>${pct(r.show_up)} showed up (${n(r.attended)} of ${n(r.registrants)})<br>${money(r.cost_per_booked)} per booked call<br>${n(r.purchases)} purchases`;
         tip.hidden = false;
         const box = trend.getBoundingClientRect();
         const x = ev.clientX - box.left, y = ev.clientY - box.top;
@@ -514,7 +518,7 @@ footer { border-top: 1px solid var(--line); padding-block: 22px 40px; font-size:
       <div class="body"><div class="nm">${esc(r.creative)}</div>
       <div><div class="mlab"><span>Booked per registrant</span><span class="num">${pct(r.book_rate)}</span></div><div class="meter"><i style="width:${(r.book_rate || 0) / maxBk * 100}%"></i></div></div>
       <dl><div><dt>Booked</dt><dd class="hot">${n(r.booked)}</dd></div><div><dt>Per call</dt><dd>${money(r.cost_per_booked)}</dd></div><div><dt>Show-up</dt><dd>${pct(r.show_up)}</dd></div>
-      <div><dt>Registrants</dt><dd>${n(r.registrants)}</dd></div><div><dt>Purchases</dt><dd>${n(r.purchases)}</dd></div><div><dt>Per sale</dt><dd>${money(r.cost_per_purchase)}</dd></div></dl></div></article>`;
+      <div><dt>Calls held</dt><dd>${n(r.held)}</dd></div><div><dt>Purchases</dt><dd>${n(r.purchases)}</dd></div><div><dt>Per sale</dt><dd>${money(r.cost_per_purchase)}</dd></div></dl></div></article>`;
   }).join('');
 
   const leaks = base.filter((r) => !r.retired && r.spend >= 300 && r.booked === 0).sort((a, b) => b.spend - a.spend);
@@ -550,9 +554,9 @@ footer { border-top: 1px solid var(--line); padding-block: 22px 40px; font-size:
     });
     $('#tbl tbody').innerHTML = rows.map((r) => `<tr class="${r.registrants < MIN ? 'low' : ''}">
       <td class="l nm">${esc(r.creative)}${r.retired ? ' <span class="pill ret">Retired</span>' : ''}</td><td class="l">${esc(r.path)}</td>
-      <td>${money(r.spend)}</td><td>${n(r.registrants)}</td><td>${pct(r.show_up)}</td><td>${n(r.booked)}</td><td>${pct(r.book_rate)}</td>
+      <td>${money(r.spend)}</td><td>${n(r.registrants)}</td><td>${pct(r.show_up)}</td><td>${n(r.booked)}</td><td>${pct(r.book_rate)}</td><td>${n(r.held)}</td><td>${money(r.cost_per_held)}</td>
       <td>${money(r.cost_per_booked)}</td><td>${n(r.purchases)}</td><td>${money(r.cost_per_purchase)}</td><td>${money(r.cost_per_attendee)}</td><td>${money(r.cost_per_reg)}</td></tr>`).join('')
-      || '<tr><td class="l" colspan="12">No creatives match.</td></tr>';
+      || '<tr><td class="l" colspan="14">No creatives match.</td></tr>';
   }
   drawTable();
 
@@ -560,7 +564,7 @@ footer { border-top: 1px solid var(--line); padding-block: 22px 40px; font-size:
   const statusPill = (s) => `<span class="pill ${s === 'Complete' ? 'done' : 'open'}">${esc(s)}</span>`;
   $('#wtbl tbody').innerHTML = weeks.slice().reverse().map((r) => `<tr><td class="l">${day(r.webinar)}</td><td class="l">${statusPill(r.status)}</td>
     <td>${money(r.spend)}</td><td>${n(r.registrants)}</td><td>${n(r.lead_form)}</td><td>${n(r.website)}</td><td>${pct(r.show_up)}</td>
-    <td>${n(r.booked)}</td><td>${money(r.cost_per_booked)}</td><td>${n(r.purchases)}</td><td>${money(r.cost_per_purchase)}</td></tr>`).join('');
+    <td>${n(r.booked)}</td><td>${n(r.held)}</td><td>${money(r.cost_per_booked)}</td><td>${n(r.purchases)}</td><td>${money(r.cost_per_purchase)}</td><td>${money(r.revenue)}</td></tr>`).join('');
   const done = weeks.filter((w) => w.status !== 'Registration open').map((w) => w.webinar).reverse();
   $('#wk').innerHTML = done.map((w) => `<option value="${w}">${day(w)}</option>`).join('');
   const drawWeek = () => {
@@ -568,15 +572,15 @@ footer { border-top: 1px solid var(--line); padding-block: 22px 40px; font-size:
     const rows = D.week_creatives.filter((r) => r.webinar === wk && r.registrants > 0)
       .sort((a, b) => b.booked - a.booked || b.purchases - a.purchases || b.attended - a.attended || b.registrants - a.registrants);
     $('#ctbl tbody').innerHTML = rows.map((r) => `<tr><td class="l nm">${esc(r.creative)}${r.retired ? ' <span class="pill ret">Retired</span>' : ''}</td><td class="l">${esc(r.path)}</td>
-      <td>${money(r.spend)}</td><td>${n(r.registrants)}</td><td>${n(r.attended)}</td><td>${pct(r.show_up)}</td><td>${n(r.booked)}</td><td>${n(r.purchases)}</td><td>${money(r.cost_per_purchase)}</td></tr>`).join('');
+      <td>${money(r.spend)}</td><td>${n(r.registrants)}</td><td>${n(r.attended)}</td><td>${pct(r.show_up)}</td><td>${n(r.booked)}</td><td>${n(r.held)}</td><td>${n(r.purchases)}</td><td>${money(r.cost_per_purchase)}</td></tr>`).join('');
   };
   $('#wk').addEventListener('change', drawWeek);
   drawWeek();
 
   // Sales
   $('#stbl tbody').innerHTML = D.sales.map((r) => `<tr><td class="l">${day(r.close)}</td><td>${money(r.amount)}</td><td class="l">${esc(r.plan)}</td>
-    <td class="l nm">${esc(r.creative)}</td><td class="l">${esc(r.path)}</td><td class="l">${day(r.webinar)}</td><td class="l">${esc(r.attended)}</td><td class="l">${esc(r.booked)}</td></tr>`).join('')
-    || '<tr><td class="l" colspan="8">No purchases yet.</td></tr>';
+    <td class="l nm">${esc(r.creative)}</td><td class="l">${esc(r.path)}</td><td class="l">${day(r.webinar)}</td><td class="l">${esc(r.attended)}</td><td class="l">${esc(r.booked)}</td><td class="l">${esc(r.held)}</td></tr>`).join('')
+    || '<tr><td class="l" colspan="9">No purchases yet.</td></tr>';
 })();
 </script>
 </body>
@@ -594,7 +598,7 @@ def main():
     latest = json.loads((HERE / "data" / "latest.json").read_text())
     score = load("scorecard")
     keep = ("key", "period", "path", "creative", "format", "spend", "registrants", "attended", "show_up",
-            "booked", "book_rate", "purchases", "cost_per_reg", "cost_per_attendee", "cost_per_booked",
+            "booked", "book_rate", "held", "held_rate", "cost_per_held", "purchases", "cost_per_reg", "cost_per_attendee", "cost_per_booked",
             "cost_per_purchase", "retired")
     data = {
         "generated": latest["generated"],

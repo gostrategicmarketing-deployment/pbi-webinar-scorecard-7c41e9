@@ -90,6 +90,7 @@ def main():
                     c["registrants"] += 1
                     c["attended"] += r["attended"]
                     c["booked"] += r["booked"]
+                    c["held"] += r.get("held", False)
         for s in web_sales:
             if s["webinar"] in webinars and s["ad"]:
                 for path in (s["path"], "All"):
@@ -106,6 +107,8 @@ def main():
             "spend": sp, "registrants": c["registrants"], "attended": c["attended"],
             "show_up": ratio(c["attended"], c["registrants"]), "booked": c["booked"],
             "book_rate": ratio(c["booked"], c["registrants"]),
+            "held": c["held"], "held_rate": ratio(c["held"], c["booked"]),
+            "cost_per_held": money(sp, c["held"]),
             "purchases": c["purchases"], "revenue": round(c["revenue"], 2),
             "cost_per_reg": money(sp, c["registrants"]),
             "cost_per_attendee": money(sp, c["attended"]),
@@ -142,6 +145,7 @@ def main():
         n = len(mine)
         att = sum(r["attended"] for r in mine) if w["complete"] else None
         booked = sum(r["booked"] for r in mine) if w["complete"] else None
+        held = sum(r.get("held", False) for r in mine) if w["complete"] else None
         week_rows.append({
             "webinar": w["webinar"], "status": status, "spend": w["spend"],
             "registrants": n,
@@ -149,6 +153,8 @@ def main():
             "website": sum(1 for r in mine if r["path"] == "Website"),
             "attended": att, "show_up": ratio(att, n) if att is not None else None,
             "booked": booked, "book_rate": ratio(booked, n) if booked is not None else None,
+            "held": held, "held_rate": ratio(held, booked) if booked else None,
+            "cost_per_held": money(w["spend"], held) if held else None,
             "cost_per_reg": money(w["spend"], n),
             "cost_per_attendee": money(w["spend"], att) if att else None,
             "cost_per_booked": money(w["spend"], booked) if booked else None,
@@ -168,6 +174,8 @@ def main():
             "webinar": s["webinar"],
             "attended": "Yes" if s["attended"] else "No",
             "booked": "Yes" if s["booked"] else "No",
+            "held": "Yes" if s.get("held") else "No",
+            "via": s.get("via", ""),
         })
 
     OUT.mkdir(exist_ok=True)
