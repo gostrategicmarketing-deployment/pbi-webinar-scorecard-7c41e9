@@ -1,0 +1,73 @@
+name: refresh
+
+# Pull GoHighLevel + Meta once a day, rebuild the scorecard and commit it; Pages serves main.
+#
+# GitHub's `schedule` is best-effort on this account (whole hours get shed), so three
+# morning slots are registered and every slot after the first that lands exits early once
+# today's refresh is in. A manual run (Actions > refresh > Run workflow) always refreshes.
+#
+# Keys live only in Actions secrets (META_TOKEN, GHL_API_KEY), both read-only, and reach
+# the pipeline as environment variables. Nothing written to the repo holds a name, email,
+# phone number or contact id.
+
+on:
+  schedule:
+    - cron: "17 11 * * *"   # ~6 AM Central
+    - cron: "47 13 * * *"   # ~8:45 AM Central, if the first was shed
+    - cron: "23 16 * * *"   # ~11 AM Central, last try
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["pipeline/**", ".github/workflows/refresh.yml"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Already refreshed today?
+        id: gate
+        run: |
+          today=$(TZ=America/Chicago date +%F)
+          last=$(python3 -c "import json,datetime,zoneinfo;g=json.load(open('version.json'))['generated'];print(datetime.datetime.fromisoformat(g).astimezone(zoneinfo.ZoneInfo('America/Chicago')).date())" 2>/dev/null || echo none)
+          echo "today=$today last=$last event=${{ github.event_name }}"
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$last" = "$today" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-python@v5
+        if: steps.gate.outputs.skip != 'true'
+        with:
+          python-version: "3.12"
+
+      - name: Install Pillow
+        if: steps.gate.outputs.skip != 'true'
+        run: pip install --quiet pillow
+
+      - name: Pull and build
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          META_TOKEN: ${{ secrets.META_TOKEN }}
+          GHL_API_KEY: ${{ secrets.GHL_API_KEY }}
+        run: |
+          python3 pipeline/track.py
+          python3 pipeline/build.py --site .
+
+      - name: Commit
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          git config user.name "gostrategicmarketing-deployment"
+          git config user.email "gostrategicmarketing-deployment@users.noreply.github.com"
+          git add -A index.html version.json robots.txt .nojekyll thumbs pipeline/data/ad_meta.json pipeline/data/spend_*.json
+          if git diff --cached --quiet; then echo "nothing changed"; exit 0; fi
+          git commit -m "daily refresh $(TZ=America/Chicago date '+%F %H:%M %Z')"
+          git push
