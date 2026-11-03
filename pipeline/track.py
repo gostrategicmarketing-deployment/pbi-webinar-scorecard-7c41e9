@@ -184,6 +184,13 @@ def closer_opps():
 
 # ---------------------------------------------------------------- cycles
 
+def overrides():
+    """Phil's hand-supplied attendee / booked / buyer lists as opaque contact ids
+    (make_overrides.py). Unioned with the GHL tags, which lag the webinar by days."""
+    f = HERE / "overrides.json"
+    return json.loads(f.read_text()) if f.exists() else {}
+
+
 def slug(d):
     return f"webinar-{d.strftime('%b').lower()}-{d.day}-{d.year}"
 
@@ -289,6 +296,8 @@ def build():
     for v in by_contact.values():
         v.sort(key=lambda s: s["t"])
 
+    ov = overrides()
+    refunded = set(ov.get("refunded", []))
     opps = closer_opps()
     opp_by_c = defaultdict(list)
     for o in opps:
@@ -308,6 +317,8 @@ def build():
         booked = set()
         for suf in BOOKED_SUFFIXES:
             booked |= {c["id"] for c in tagged(f"{slug(d)}-{suf}")}
+        att |= set(ov.get("attended", {}).get(d.isoformat(), []))
+        booked |= set(ov.get("booked", {}).get(d.isoformat(), []))
         wk_lo, wk_hi = d.isoformat(), (d + timedelta(days=7)).isoformat()
         booked |= {o["c"] for o in opps if o["source"] == PPA_SOURCE and wk_lo <= o["created"][:10] < wk_hi}
         opened, closed = cycle_window(d)
@@ -352,10 +363,11 @@ def build():
                     "closed won - bb retake": "BB retake"}.get(o["stage"], o["stage"])
             buyers.append({"id": o["c"], "close": o["changed"][:10], "amount": o["value"],
                            "plan": plan, "tags": None, "via": "Closer Pipeline"})
+    buyers = [b for b in buyers if b["id"] not in refunded]
     tag_buyers = tagged(PURCHASE_TAG)
     tag_by_c = {b["id"]: b for b in tag_buyers}
     for b in tag_buyers:
-        if b["id"] not in won_c:
+        if b["id"] not in won_c and b["id"] not in refunded:
             buyers.append(dict(b, via="bb purchased tag"))
     for b in buyers:
         if b["tags"] is None:
