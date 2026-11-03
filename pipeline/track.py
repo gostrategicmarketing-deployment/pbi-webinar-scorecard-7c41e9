@@ -297,7 +297,7 @@ def build():
         v.sort(key=lambda s: s["t"])
 
     ov = overrides()
-    refunded = set(ov.get("refunded", []))
+    refunded = set(ov.get("refunded", [])) | {c["id"] for c in tagged("bb-purchase-refund")}
     opps = closer_opps()
     opp_by_c = defaultdict(list)
     for o in opps:
