@@ -19,7 +19,8 @@ Every number comes from GoHighLevel except spend:
   the ad       the contact's own form submission in that cycle:
                  website opt-in  -> url_params.h_ad_id on the Weekly Webinar [Facebook] funnel
                  Meta lead form  -> GHL's synced fb-<location> submission, which carries ad_id
-  spend        Meta hourly ad-level spend inside the cycle (noon CT Monday to noon CT Monday)
+  spend        Meta ad-level spend inside the cycle (noon CT Monday to noon CT Monday): hourly
+               buckets, checked per ad per day against Meta's day-level rows (see spend_by_ad)
 
 Purchases are credited to the most recent webinar the buyer registered for on or before
 the close date, and to the ad on that registration. A buyer with no webinar registration
@@ -219,29 +220,66 @@ def parse_t(s):
 # ---------------------------------------------------------------- Meta
 
 def spend_by_ad(opened, closed, now):
-    """Webinar-campaign spend per ad inside [opened, closed), from hourly buckets."""
+    """Webinar-campaign spend per ad inside [opened, closed).
+
+    Hourly buckets give the noon boundary; ad-level day rows check them. From the 21:00
+    Pacific bucket on 2026-11-14 Meta's hourly breakdown returned spend 0 on every row
+    while answering 200, and on 2026-10-21 it was the day-level rows that came back
+    zeroed, so neither read is trusted alone. Per ad and per day: where the hourly sum
+    falls short of the day figure, a day wholly inside the cycle takes the shortfall in
+    full (exact), and a day the cycle cuts through takes it by its share of hours (the
+    one estimate; the split inside that day is not knowable from a day total).
+    """
     cache = DATA / f"spend_{opened.date()}.json"
     if closed <= now - timedelta(days=2) and cache.exists():
         return json.loads(cache.read_text())
     o = opened.astimezone(pull.ACCOUNT_TZ)
     c = min(closed, now).astimezone(pull.ACCOUNT_TZ)
-    rows = pull.get_all(f"{pull.ACCOUNT}/insights", {
+    scope = {
         "level": "ad", "fields": "ad_id,spend",
-        "breakdowns": "hourly_stats_aggregated_by_advertiser_time_zone",
         "filtering": json.dumps([{"field": "campaign.name", "operator": "CONTAIN",
                                   "value": pull.CAMPAIGN_MATCH}]),
         "time_range": json.dumps({"since": o.date().isoformat(), "until": c.date().isoformat()}),
-        "time_increment": 1, "limit": 500})
-    spend = defaultdict(float)
-    for r in rows:
+        "time_increment": 1, "limit": 500}
+    hourly = pull.get_all(f"{pull.ACCOUNT}/insights", {
+        **scope, "breakdowns": "hourly_stats_aggregated_by_advertiser_time_zone"})
+    by_day = pull.get_all(f"{pull.ACCOUNT}/insights", scope)
+
+    inside, whole = defaultdict(float), defaultdict(float)     # keyed (ad, day)
+    for r in hourly:
         try:
             hour = int(r.get("hourly_stats_aggregated_by_advertiser_time_zone", "")[:2])
         except ValueError:
             continue
+        key = (r["ad_id"], r["date_start"])
+        v = float(r.get("spend") or 0)
+        whole[key] += v
         stamp = datetime.combine(date.fromisoformat(r["date_start"]), time(hour), pull.ACCOUNT_TZ)
         if o <= stamp < c:
-            spend[r["ad_id"]] += float(r.get("spend") or 0)
-    spend = {k: round(v, 2) for k, v in spend.items()}
+            inside[key] += v
+    day_level = defaultdict(float)
+    for r in by_day:
+        day_level[(r["ad_id"], r["date_start"])] += float(r.get("spend") or 0)
+
+    now_a = now.astimezone(pull.ACCOUNT_TZ)
+    spend, patched = defaultdict(float), 0.0
+    for key in set(inside) | set(day_level):
+        ad, day = key
+        d0 = datetime.combine(date.fromisoformat(day), time(0), pull.ACCOUNT_TZ)
+        ran_to = min(d0 + timedelta(days=1), now_a)
+        lo, hi = max(o, d0), min(c, ran_to)
+        if hi <= lo:
+            continue
+        gap = day_level[key] - whole[key]
+        gap = gap if gap > max(0.02, day_level[key] * 0.01) else 0.0
+        is_whole = o <= d0 and c >= ran_to - timedelta(minutes=10)
+        add = gap * (1.0 if is_whole else (hi - lo) / (ran_to - d0))
+        spend[ad] += inside[key] + add
+        patched += add
+    if patched:
+        print(f"  spend {opened.date()}: hourly buckets were short by ${patched:,.2f}; "
+              "made up from Meta's day-level rows", flush=True)
+    spend = {k: round(v, 2) for k, v in spend.items() if round(v, 2)}
     if closed <= now - timedelta(days=2):
         cache.write_text(json.dumps(spend))
     return spend
